@@ -20,3 +20,13 @@ Thumbs.db
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Ignore trained models
+models/*.pkl
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environment
+.venv/
