@@ -42,23 +42,40 @@ POLLUTANT_DEFAULTS = {
 _CACHED_MODEL = None
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 def load_model():
-    """Load the trained AQI prediction model with fallback support."""
+    """Load the trained AQI prediction model with fallback support and logging."""
     global _CACHED_MODEL
     if _CACHED_MODEL is not None:
         return _CACHED_MODEL
 
-    if PRIMARY_MODEL_PATH.exists():
-        model_path = PRIMARY_MODEL_PATH
-    elif FALLBACK_MODEL_PATH.exists():
-        model_path = FALLBACK_MODEL_PATH
-    else:
-        raise FileNotFoundError(
-            f"No model artifact found at {PRIMARY_MODEL_PATH} or {FALLBACK_MODEL_PATH}."
-        )
+    candidate_models = [
+        ("Primary Random Forest Model", PRIMARY_MODEL_PATH),
+        ("Alternative Random Forest Model", PROJECT_ROOT / "models" / "random_forest_model.pkl"),
+        ("Fallback Linear Regression Model", FALLBACK_MODEL_PATH)
+    ]
 
-    _CACHED_MODEL = joblib.load(model_path)
-    return _CACHED_MODEL
+    last_error = None
+    for name, model_path in candidate_models:
+        if model_path.exists():
+            try:
+                _CACHED_MODEL = joblib.load(model_path)
+                logger.info("Successfully loaded %s from %s", name, model_path)
+                return _CACHED_MODEL
+            except Exception as e:
+                logger.warning(
+                    "Failed to deserialize %s at %s: %s. Attempting fallback.",
+                    name, model_path, str(e)
+                )
+                last_error = e
+
+    error_msg = f"No model artifact could be loaded from candidate paths. Last error: {last_error}"
+    logger.error(error_msg)
+    raise FileNotFoundError(error_msg)
 
 
 def prepare_input(data: Union[Dict[str, Any], pd.DataFrame]) -> pd.DataFrame:
