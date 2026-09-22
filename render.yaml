@@ -1,4 +1,5 @@
 services:
+  # Backend Flask REST API & ML Inference Engine
   - type: web
     name: air-aqi-prediction
     runtime: python
@@ -7,3 +8,17 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.0
+
+  # Frontend Static Site on Render (Standalone React SPA deployment)
+  - type: web
+    name: airsense-react-frontend
+    runtime: static
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: ./frontend/dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://air-aqi-prediction.onrender.com
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

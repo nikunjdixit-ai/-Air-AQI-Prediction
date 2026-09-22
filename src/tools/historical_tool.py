@@ -155,9 +155,9 @@ def get_historical_aqi(
             "interquartile_range": [p25, p75]
         },
         "seasonal_averages": {
-            "winter_nov_jan": round(winter_mean, 1) if not np.isnan(winter_mean) else None,
-            "monsoon_jul_sep": round(monsoon_mean, 1) if not np.isnan(monsoon_mean) else None,
-            "summer_apr_jun": round(summer_mean, 1) if not np.isnan(summer_mean) else None
+            "winter_nov_jan": round(float(winter_mean), 1) if not np.isnan(winter_mean) else None,
+            "monsoon_jul_sep": round(float(monsoon_mean), 1) if not np.isnan(monsoon_mean) else None,
+            "summer_apr_jun": round(float(summer_mean), 1) if not np.isnan(summer_mean) else None
         },
         "category_frequency": cat_distribution,
         "historical_pollutant_means": pollutant_means,

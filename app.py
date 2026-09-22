@@ -17,14 +17,18 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, render_template_string, request, send_from_directory
 from dotenv import load_dotenv
 
 load_dotenv()
 
+FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
+
 from src.predictor import predict_aqi_rich, load_model
 from src.tools.live_aqi_tool import fetch_live_air_quality
+from src.tools.weather_tool import fetch_weather_forecast
 from src.tools.prediction_tool import predict_aqi_tool
+from src.tools.historical_tool import get_historical_aqi
 from src.agent.orchestrator import AirQualityAgent
 
 # Configure logging
@@ -34,6 +38,26 @@ logger = logging.getLogger("flask_app")
 # Initialize Flask application instance
 app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
+
+
+@app.before_request
+def handle_preflight():
+    """Handle CORS preflight OPTIONS requests across all routes."""
+    if request.method == "OPTIONS":
+        response = app.make_default_options_response()
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, X-Requested-With"
+        return response
+
+
+@app.after_request
+def add_cors_headers(response):
+    """Add CORS headers to every response for cross-origin frontend support."""
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, X-Requested-With"
+    return response
 
 # Lazy-loaded agent instance
 _agent_instance = None
@@ -480,8 +504,33 @@ HTML_TEMPLATE = """
 
 @app.route("/", methods=["GET"])
 def index():
-    """Web interface / documentation portal."""
+    """Serve compiled React SPA if built; fallback to interactive documentation portal."""
+    if FRONTEND_DIST.exists() and (FRONTEND_DIST / "index.html").exists():
+        return send_from_directory(FRONTEND_DIST, "index.html")
     return render_template_string(HTML_TEMPLATE)
+
+
+@app.route("/docs", methods=["GET"])
+def documentation():
+    """Interactive API documentation and demo portal."""
+    return render_template_string(HTML_TEMPLATE)
+
+
+@app.route("/assets/<path:filename>", methods=["GET"])
+def serve_assets(filename):
+    """Serve static bundle assets for the React application."""
+    assets_dir = FRONTEND_DIST / "assets"
+    if assets_dir.exists():
+        return send_from_directory(assets_dir, filename)
+    return ("Asset not found", 404)
+
+
+@app.route("/favicon.svg", methods=["GET"])
+def serve_favicon():
+    """Serve favicon from React build or public directory."""
+    if FRONTEND_DIST.exists() and (FRONTEND_DIST / "favicon.svg").exists():
+        return send_from_directory(FRONTEND_DIST, "favicon.svg")
+    return ("", 204)
 
 
 @app.route("/health", methods=["GET"])
@@ -507,22 +556,50 @@ def health():
     }), 200
 
 
-@app.route("/live", methods=["GET"])
+@app.route("/live", methods=["GET", "OPTIONS"])
 def live_aqi():
-    """Retrieve real-time atmospheric sensor data for a city."""
+    """Retrieve real-time atmospheric sensor and weather telemetry for a city."""
     city = request.args.get("city") or request.args.get("location") or "Delhi"
     result = fetch_live_air_quality(city)
+    if result.get("status") == "success":
+        try:
+            weather_data = fetch_weather_forecast(city)
+            if weather_data.get("status") == "success":
+                result["weather"] = {
+                    "temperature": weather_data.get("temperature_c"),
+                    "feels_like": weather_data.get("feels_like_c"),
+                    "relative_humidity": weather_data.get("relative_humidity_pct"),
+                    "wind_speed": weather_data.get("wind_speed_kmh"),
+                    "condition": weather_data.get("weather_condition"),
+                    "dispersion": weather_data.get("dispersion_analysis", {}).get("condition"),
+                }
+                result["dispersion_index"] = weather_data.get("dispersion_analysis", {}).get("condition")
+        except Exception as e:
+            logger.warning("Weather augmentation failed for %s: %s", city, e)
+
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
 
 
-@app.route("/predict", methods=["GET", "POST"])
+@app.route("/historical", methods=["GET", "OPTIONS"])
+def historical_aqi():
+    """Retrieve historical air quality distribution and trends for a city."""
+    city = request.args.get("city") or request.args.get("location") or "Delhi"
+    result = get_historical_aqi(city)
+    status_code = 200 if result.get("status") == "success" else 400
+    return jsonify(result), status_code
+
+
+@app.route("/predict", methods=["GET", "POST", "OPTIONS"])
 def predict():
     """
     Predict AQI using the trained Random Forest model.
     Validates input values strictly and returns descriptive 400 Bad Request
     on non-numeric or negative inputs, avoiding 500 server errors.
     """
+    if request.method == "OPTIONS":
+        return jsonify({"status": "ok"}), 200
+
     raw_payload: Dict[str, Any] = {}
 
     if request.method == "POST":
@@ -563,12 +640,15 @@ def predict():
         }), 500
 
 
-@app.route("/agent", methods=["GET", "POST"])
+@app.route("/agent", methods=["GET", "POST", "OPTIONS"])
 def agent_query():
     """
     Query the autonomous Air Quality Intelligence Agent.
     Accepts JSON: {"query": "..."} or GET query parameter: ?query=...
     """
+    if request.method == "OPTIONS":
+        return jsonify({"status": "ok"}), 200
+
     query = ""
     if request.method == "POST":
         if request.is_json:

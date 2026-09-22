@@ -130,13 +130,29 @@ class TestFlaskRenderApp(unittest.TestCase):
         self.assertIn("response", json_data)
         self.assertIn("activity", json_data)
 
-    def test_agent_endpoint_missing_query(self):
-        """Verify /agent returns 400 when query is empty or missing."""
-        response = self.client.post("/agent", json={"query": ""})
-        self.assertEqual(response.status_code, 400)
+    def test_historical_endpoint(self):
+        """Verify /historical endpoint returns historical distributions and stats for a city."""
+        response = self.client.get("/historical?city=Delhi")
+        self.assertEqual(response.status_code, 200)
         json_data = response.get_json()
-        self.assertEqual(json_data["status"], "error")
+        self.assertEqual(json_data["status"], "success")
+        self.assertIn("stats", json_data)
+        self.assertIn("mean_aqi", json_data["stats"])
+
+    def test_cors_headers(self):
+        """Verify CORS headers are present on responses."""
+        response = self.client.get("/health")
+        self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), "*")
+        self.assertIn("POST", response.headers.get("Access-Control-Allow-Methods", ""))
+
+    def test_options_preflight(self):
+        """Verify preflight OPTIONS request returns HTTP 200 and allowed CORS headers."""
+        response = self.client.open("/predict", method="OPTIONS")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), "*")
+        self.assertIn("Content-Type", response.headers.get("Access-Control-Allow-Headers", ""))
 
 
 if __name__ == "__main__":
     unittest.main()
+

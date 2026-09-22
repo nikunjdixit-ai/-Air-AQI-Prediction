@@ -181,27 +181,73 @@ git clone https://github.com/nikunjdixit-ai/-Air-AQI-Prediction.git
 cd -Air-AQI-Prediction
 ```
 
-### 2. Install Dependencies
+### 2. Backend Setup & Startup (Flask REST API)
 ```bash
+# Create and activate virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install backend dependencies
 pip install -r requirements.txt
-```
 
-### 3. (Optional) Configure Environment Variables
-Copy `.env.example` to `.env` if you want to use OpenAI or Gemini for LLM function calling:
+# Start the Flask REST API & ML Server (port 5000)
+python app.py
+```
+> The Flask API serves the production React SPA at `http://127.0.0.1:5000/`, REST endpoints at `/live`, `/predict`, `/historical`, `/agent`, `/health`, and the interactive tester at `/docs`.
+
+### 3. Frontend Setup & Development (React 19 + Vite)
 ```bash
-cp .env.example .env
-```
-> **Zero-Configuration Guarantee:** You do **not** need an API key to test the agent. If no key is set, the system automatically uses the built-in **Deterministic ReAct Engine** with full access to live weather, live AQI, the ML model, and historical data!
+cd frontend
+npm install
 
-### 4. Run the Test Suite
+# Start Vite live development server (port 5173 with hot reload)
+npm run dev
+
+# Run production build and linter
+npm run build
+npm run lint
+```
+
+### 4. (Optional) Streamlit Legacy Interface
+The original conversational Streamlit prototype is preserved and can be run side-by-side:
+```bash
+streamlit run app/app.py
+```
+
+### 5. Run the Automated Test Suite
 ```bash
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
-### 5. Launch the Application
-```bash
-streamlit run app/app.py
-```
+---
+
+## 🌐 Production REST API Endpoints
+
+| Method | Endpoint | Description | Query / Body Payload | Response |
+| :--- | :--- | :--- | :--- | :--- |
+| `GET` | `/` | Serves compiled AirSense React SPA (or documentation portal) | None | HTML / Static Assets |
+| `GET` | `/health` | Production uptime check & model load status | None | `{"status": "healthy", "model_loaded": true, "version": "1.1.0"}` |
+| `GET` | `/live` | Real-time atmospheric sensor data & weather dispersion | `?city=Delhi` | `{"status": "success", "aqi": 166, "pollutants": {...}, "weather": {...}}` |
+| `POST` | `/predict` | Tuned Random Forest 15-feature AQI forecast | `{"location": "Kanpur", "PM2.5": 55, "PM10": 95, ...}` | `{"status": "success", "aqi": 111.8, "category": "Moderate", "major_factors": [...]}` |
+| `GET` | `/historical` | Multi-year seasonal distributions & percentile benchmarks | `?city=Kanpur` | `{"status": "success", "stats": {...}, "seasonal_averages": {...}}` |
+| `POST` | `/agent` | Natural language query to autonomous ReAct agent | `{"query": "Is it safe to run in Delhi?"}` | `{"status": "success", "response": "...", "activity": [...]}` |
+| `GET` | `/docs` | Interactive API documentation and endpoint tester | None | Interactive Bootstrap Web Portal |
+
+---
+
+## ☁️ Render Production Deployment
+
+AirSense is configured for one-click deployment on [Render](https://render.com) using the root `render.yaml`:
+
+1. **Option A — Unified Full-Stack Service (Recommended)**:
+   - Render Web Service using `gunicorn app:app` (Python 3.12).
+   - In production, building `frontend/dist` allows Flask to serve both the React SPA and the REST API from the same origin with zero cross-origin latency.
+2. **Option B — Decoupled Frontend + API**:
+   - Backend: Python Web Service (`https://air-aqi-prediction.onrender.com`).
+   - Frontend: Render Static Site publishing `./frontend/dist` with rewrite rules to `/index.html`.
+   - Set environment variable `VITE_API_BASE_URL=https://air-aqi-prediction.onrender.com` in frontend environment settings.
+
+> **Zero API Key Requirement:** The system operates with **zero API keys required** by default using public Open-Meteo sensor APIs and the deterministic ReAct orchestrator. Optional OpenAI/Gemini/Groq keys can be configured via `.env` without modifying any source code.
 
 ---
 

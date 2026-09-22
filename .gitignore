@@ -17,12 +17,19 @@ Thumbs.db
 
 # Environment variables
 .env
+.env.*
+!.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
 
 # Jupyter
 .ipynb_checkpoints/
 
-# Ignore trained models
+# Trained models - whitelist production deployment models
 models/*.pkl
+!models/best_model.pkl
+!models/linear_regression_model.pkl
 
 # Python cache
 __pycache__/
@@ -30,6 +37,9 @@ __pycache__/
 
 # Virtual environment
 .venv/
+
 # Frontend
 frontend/node_modules/
 frontend/dist/
+frontend/.env
+
