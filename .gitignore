@@ -30,3 +30,6 @@ __pycache__/
 
 # Virtual environment
 .venv/
+# Frontend
+frontend/node_modules/
+frontend/dist/
