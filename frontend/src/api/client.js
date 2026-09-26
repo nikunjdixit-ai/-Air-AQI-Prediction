@@ -1,35 +1,43 @@
 /**
- * AirSense Unified API Client
- * Configures base URL from environment variables with production Render fallback.
+ * AirSense API Client
+ *
+ * Local development:
+ *   React/Vite -> Vite proxy -> Flask at 127.0.0.1:5000
+ *
+ * Production:
+ *   React -> same-origin Flask/Gunicorn
+ *
+ * VITE_API_BASE_URL can optionally override the API origin.
  */
-
-// Fallback to live Render backend if no specific environment URL is provided
-const DEFAULT_REMOTE_URL = "https://air-aqi-prediction.onrender.com";
 
 export const API_BASE_URL = (() => {
   const envUrl = import.meta.env.VITE_API_BASE_URL;
+
   if (envUrl && typeof envUrl === "string" && envUrl.trim() !== "") {
     return envUrl.trim().replace(/\/+$/, "");
   }
-  // In development, prefer local server if available, but allow remote fallback
-  if (import.meta.env.DEV) {
-    return "http://127.0.0.1:5000";
-  }
-  // Production default
-  return DEFAULT_REMOTE_URL;
+
+  // Empty base URL means:
+  // - Local development: Vite proxy handles /api requests.
+  // - Production: Flask/Gunicorn handles same-origin requests.
+  return "";
 })();
 
 /**
- * Universal fetch wrapper with timeout and standardized JSON response parsing.
+ * Universal fetch wrapper with timeout and standardized JSON parsing.
  */
-export async function apiRequest(endpoint, options = {}, timeoutMs = 12000) {
-  const url = `${API_BASE_URL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+export async function apiRequest(endpoint, options = {}, timeoutMs = 30000) {
+  const normalizedEndpoint = endpoint.startsWith("/")
+    ? endpoint
+    : `/${endpoint}`;
+
+  const url = `${API_BASE_URL}${normalizedEndpoint}`;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   const defaultHeaders = {
-    "Accept": "application/json",
+    Accept: "application/json",
     ...(options.body ? { "Content-Type": "application/json" } : {}),
     ...(options.headers || {}),
   };
@@ -49,7 +57,9 @@ export async function apiRequest(endpoint, options = {}, timeoutMs = 12000) {
       return {
         success: false,
         status: response.status,
-        error: (data && data.message) || `HTTP error ${response.status}: ${response.statusText}`,
+        error:
+          (data && (data.message || data.error)) ||
+          `HTTP error ${response.status}: ${response.statusText}`,
         data,
       };
     }
@@ -61,12 +71,14 @@ export async function apiRequest(endpoint, options = {}, timeoutMs = 12000) {
     };
   } catch (err) {
     clearTimeout(timeoutId);
+
     const isTimeout = err.name === "AbortError";
+
     return {
       success: false,
       status: 0,
       error: isTimeout
-        ? `Request timed out after ${timeoutMs / 1000}s. Server may be spinning up from cold sleep.`
+        ? `Request timed out after ${timeoutMs / 1000}s.`
         : `Network connection error: ${err.message}`,
       data: null,
     };

@@ -504,15 +504,13 @@ HTML_TEMPLATE = """
 
 @app.route("/", methods=["GET"])
 def index():
-    """Serve compiled React SPA if built; fallback to interactive documentation portal."""
-    if FRONTEND_DIST.exists() and (FRONTEND_DIST / "index.html").exists():
-        return send_from_directory(FRONTEND_DIST, "index.html")
-    return render_template_string(HTML_TEMPLATE)
+    """Serve compiled production React SPA at the root URL."""
+    return send_from_directory(FRONTEND_DIST, "index.html")
 
 
 @app.route("/docs", methods=["GET"])
 def documentation():
-    """Interactive API documentation and demo portal."""
+    """Interactive API documentation portal (accessible explicitly at /docs)."""
     return render_template_string(HTML_TEMPLATE)
 
 
@@ -520,17 +518,37 @@ def documentation():
 def serve_assets(filename):
     """Serve static bundle assets for the React application."""
     assets_dir = FRONTEND_DIST / "assets"
-    if assets_dir.exists():
-        return send_from_directory(assets_dir, filename)
-    return ("Asset not found", 404)
+    return send_from_directory(assets_dir, filename)
 
 
 @app.route("/favicon.svg", methods=["GET"])
 def serve_favicon():
-    """Serve favicon from React build or public directory."""
-    if FRONTEND_DIST.exists() and (FRONTEND_DIST / "favicon.svg").exists():
+    """Serve favicon from React build."""
+    if (FRONTEND_DIST / "favicon.svg").exists():
         return send_from_directory(FRONTEND_DIST, "favicon.svg")
     return ("", 204)
+
+
+@app.route("/icons.svg", methods=["GET"])
+def serve_icons():
+    """Serve icons from React build."""
+    if (FRONTEND_DIST / "icons.svg").exists():
+        return send_from_directory(FRONTEND_DIST, "icons.svg")
+    return ("", 204)
+
+
+@app.errorhandler(404)
+def spa_fallback(e):
+    """Fallback to React index.html for client-side SPA routes on GET requests."""
+    if request.method == "GET" and not request.path.startswith(
+        ("/health", "/status", "/live", "/predict", "/historical", "/agent", "/assets/", "/docs")
+    ):
+        candidate = FRONTEND_DIST / request.path.lstrip("/")
+        if candidate.is_file():
+            return send_from_directory(FRONTEND_DIST, request.path.lstrip("/"))
+        if (FRONTEND_DIST / "index.html").exists():
+            return send_from_directory(FRONTEND_DIST, "index.html")
+    return jsonify({"status": "error", "message": "Endpoint not found"}), 404
 
 
 @app.route("/health", methods=["GET"])
@@ -558,12 +576,47 @@ def health():
 
 @app.route("/live", methods=["GET", "OPTIONS"])
 def live_aqi():
-    """Retrieve real-time atmospheric sensor and weather telemetry for a city."""
-    city = request.args.get("city") or request.args.get("location") or "Delhi"
-    result = fetch_live_air_quality(city)
-    if result.get("status") == "success":
+    """Retrieve real-time atmospheric sensor and weather telemetry for a city or coordinates."""
+    raw_lat = request.args.get("lat")
+    raw_lon = request.args.get("lon")
+    city = request.args.get("city") or request.args.get("location")
+
+    lat_val = None
+    lon_val = None
+    if raw_lat is not None or raw_lon is not None:
+        if raw_lat is None or raw_lon is None:
+            return jsonify({
+                "status": "error",
+                "message": "Both 'lat' and 'lon' query parameters are required when querying by coordinates."
+            }), 400
         try:
-            weather_data = fetch_weather_forecast(city)
+            lat_val = float(raw_lat)
+            lon_val = float(raw_lon)
+        except (TypeError, ValueError):
+            return jsonify({
+                "status": "error",
+                "message": "Coordinates 'lat' and 'lon' must be valid numbers."
+            }), 400
+        if not (-90.0 <= lat_val <= 90.0 and -180.0 <= lon_val <= 180.0):
+            return jsonify({
+                "status": "error",
+                "message": "Invalid coordinate range: 'lat' must be in [-90, 90] and 'lon' in [-180, 180]."
+            }), 400
+
+    if lat_val is None and lon_val is None and not city:
+        city = "Delhi"
+
+    result = fetch_live_air_quality(location=city, latitude=lat_val, longitude=lon_val)
+    if result.get("status") == "success":
+        result.setdefault("data_mode", "live")
+        result.setdefault("data_timestamp", result.get("measurement_time"))
+        result.setdefault("source", "Live Air Quality Data (Open-Meteo)")
+        try:
+            weather_data = fetch_weather_forecast(
+                location=result.get("location") or city,
+                latitude=result.get("latitude", lat_val),
+                longitude=result.get("longitude", lon_val),
+            )
             if weather_data.get("status") == "success":
                 result["weather"] = {
                     "temperature": weather_data.get("temperature_c"),
@@ -575,7 +628,7 @@ def live_aqi():
                 }
                 result["dispersion_index"] = weather_data.get("dispersion_analysis", {}).get("condition")
         except Exception as e:
-            logger.warning("Weather augmentation failed for %s: %s", city, e)
+            logger.warning("Weather augmentation failed for %s: %s", result.get("location") or city, e)
 
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code

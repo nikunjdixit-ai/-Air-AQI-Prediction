@@ -63,20 +63,37 @@ def evaluate_dispersion(wind_speed: float, humidity: float, precip: float) -> Di
     }
 
 
-def fetch_weather_forecast(location: str, date_or_time: Optional[str] = None) -> Dict[str, Any]:
+from src.tools.live_aqi_tool import geocode_location, reverse_geocode_coordinates
+
+
+def fetch_weather_forecast(
+    location: Optional[str] = None,
+    date_or_time: Optional[str] = None,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
+) -> Dict[str, Any]:
     """
-    Retrieve current weather and 3-day forecast for a given location.
+    Retrieve current weather and 3-day forecast for a given location or coordinates.
     Includes temperature, humidity, wind velocity, precipitation, and atmospheric dispersion index.
     """
-    geo = geocode_location(location)
-    if not geo:
-        return {
-            "status": "error",
-            "message": f"Could not geocode location '{location}' for weather forecast.",
-            "location": location
-        }
-
-    resolved_name, lat, lon = geo
+    if latitude is not None and longitude is not None:
+        lat = float(latitude)
+        lon = float(longitude)
+        resolved_name = (
+            location.strip()
+            if (location and location.strip())
+            else reverse_geocode_coordinates(lat, lon)
+        )
+    else:
+        target_loc = location or "Delhi"
+        geo = geocode_location(target_loc)
+        if not geo:
+            return {
+                "status": "error",
+                "message": f"Could not geocode location '{target_loc}' for weather forecast.",
+                "location": target_loc
+            }
+        resolved_name, lat, lon = geo
 
     try:
         url = (

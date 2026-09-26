@@ -168,6 +168,49 @@ class AirQualityAgent:
         Guarantees zero-failure operation even without external LLM API credits.
         """
         q_lower = query.lower()
+        all_locations: List[str] = self.memory.entities.get("all_locations", [])
+        is_comparison_intent = bool(
+            re.search(r"\b(?:compare|comparison|vs\.?|versus|or|between)\b", q_lower)
+        )
+
+        # Multi-city comparison path when 2+ locations are detected with comparison intent
+        if len(all_locations) >= 2 and is_comparison_intent:
+            activity.append(
+                f"📍 Multi-city comparison identified from context: **{', '.join(all_locations)}**"
+            )
+            needs_comparison_history = any(
+                w in q_lower for w in ["histor", "trend", "past", "previous", "usual", "average"]
+            )
+
+            tool_outputs["fetch_live_air_quality"] = {}
+            if needs_comparison_history:
+                tool_outputs["get_historical_aqi"] = {}
+
+            for city in all_locations:
+                activity.append(f"📡 Calling `fetch_live_air_quality` for **{city}**...")
+                city_live = dispatch_tool("fetch_live_air_quality", {"location": city})
+                tool_outputs["fetch_live_air_quality"][city] = city_live
+
+                if needs_comparison_history:
+                    city_curr_aqi = (
+                        city_live.get("aqi", 120.0)
+                        if (city_live and city_live.get("status") == "success")
+                        else 120.0
+                    )
+                    activity.append(f"📊 Calling `get_historical_aqi` for **{city}**...")
+                    city_hist = dispatch_tool(
+                        "get_historical_aqi",
+                        {"location": city, "current_aqi": city_curr_aqi},
+                    )
+                    tool_outputs["get_historical_aqi"][city] = city_hist
+
+            activity.append("✅ Synthesizing comprehensive intelligence response...")
+            return self._format_comparison_response(
+                locations=all_locations,
+                live_by_city=tool_outputs["fetch_live_air_quality"],
+                history_by_city=tool_outputs.get("get_historical_aqi") if needs_comparison_history else None,
+            )
+
         location = self.memory.get_location()
 
         if not location:
@@ -271,6 +314,77 @@ class AirQualityAgent:
             is_why=is_why_or_cause,
             is_trend=is_trend_or_history
         )
+
+    def _format_comparison_response(
+        self,
+        locations: List[str],
+        live_by_city: Dict[str, Dict[str, Any]],
+        history_by_city: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> str:
+        """Render a side-by-side Markdown comparison across 2+ cities with a verdict."""
+        parts = [f"### 🌍 Multi-City Air Quality Comparison: {' vs. '.join(locations)}\n"]
+
+        has_history = bool(history_by_city)
+        if has_history:
+            parts.append("| City | Current AQI | Category | Dominant Pollutant | Historical Mean AQI |")
+            parts.append("| :--- | :---: | :---: | :---: | :---: |")
+        else:
+            parts.append("| City | Current AQI | Category | Dominant Pollutant |")
+            parts.append("| :--- | :---: | :---: | :---: |")
+
+        valid_aqi_entries = []
+        detail_lines = []
+
+        for city in locations:
+            live = live_by_city.get(city) or {}
+            hist = (history_by_city or {}).get(city) or {}
+            hist_mean = (
+                f"{hist.get('stats', {}).get('mean_aqi')}"
+                if hist.get("status") == "success" and hist.get("stats", {}).get("mean_aqi") is not None
+                else "—"
+            )
+
+            if live.get("status") == "success" and live.get("aqi") is not None:
+                aqi_val = float(live["aqi"])
+                cat = live.get("category", "Unknown")
+                dom = live.get("dominant_pollutant", "PM2.5")
+                valid_aqi_entries.append((city, aqi_val, cat))
+
+                if has_history:
+                    parts.append(f"| **{city}** | **{aqi_val:.0f}** | {cat} | `{dom}` | {hist_mean} |")
+                    detail_lines.append(
+                        f"- **{city}:** Current AQI **{aqi_val:.0f}** ({cat}) | Dominant Pollutant: `{dom}` | Historical Mean AQI: `{hist_mean}`"
+                    )
+                else:
+                    parts.append(f"| **{city}** | **{aqi_val:.0f}** | {cat} | `{dom}` |")
+                    detail_lines.append(
+                        f"- **{city}:** Current AQI **{aqi_val:.0f}** ({cat}) | Dominant Pollutant: `{dom}`"
+                    )
+            else:
+                err_msg = live.get("message", "Live data unavailable")
+                if has_history:
+                    parts.append(f"| **{city}** | Unavailable | — | — | {hist_mean} |")
+                else:
+                    parts.append(f"| **{city}** | Unavailable | — | — |")
+                detail_lines.append(f"- **{city}:** ⚠️ *{err_msg}*")
+
+        parts.append("\n" + "\n".join(detail_lines))
+
+        if len(valid_aqi_entries) >= 2:
+            sorted_by_aqi = sorted(valid_aqi_entries, key=lambda x: x[1])
+            best_city, best_aqi, best_cat = sorted_by_aqi[0]
+            worst_city, worst_aqi, worst_cat = sorted_by_aqi[-1]
+            if best_aqi == worst_aqi:
+                parts.append(
+                    f"\n🏆 **Verdict:** Both **{best_city}** and **{worst_city}** currently have identical air quality (AQI **{best_aqi:.0f}**, {best_cat})."
+                )
+            else:
+                diff = worst_aqi - best_aqi
+                parts.append(
+                    f"\n🏆 **Verdict:** **{best_city}** currently has better air quality than **{worst_city}** (AQI **{best_aqi:.0f}** [{best_cat}] vs. **{worst_aqi:.0f}** [{worst_cat}], cleaner by **{diff:.0f}** AQI points)."
+                )
+
+        return "\n".join(parts)
 
     def _format_agent_response(
         self,

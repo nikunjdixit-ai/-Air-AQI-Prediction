@@ -6,6 +6,7 @@
 export const CITIES = [
   { id: "kanpur", name: "Kanpur", state: "Uttar Pradesh", defaultAqi: 142 },
   { id: "delhi", name: "Delhi", state: "National Capital Territory", defaultAqi: 215 },
+  { id: "lucknow", name: "Lucknow", state: "Uttar Pradesh", defaultAqi: 154 },
   { id: "mumbai", name: "Mumbai", state: "Maharashtra", defaultAqi: 98 },
   { id: "bengaluru", name: "Bengaluru", state: "Karnataka", defaultAqi: 68 },
   { id: "kolkata", name: "Kolkata", state: "West Bengal", defaultAqi: 135 },
@@ -88,6 +89,35 @@ export const CITY_DEFAULTS = {
       { day: "Fri", aqi: 240 },
       { day: "Sat", aqi: 225 },
       { day: "Sun", aqi: 215 },
+    ],
+  },
+  Lucknow: {
+    aqi: 154,
+    category: "Moderate",
+    description: "Moderate particulate concentration; sensitive groups should limit prolonged outdoor exertion.",
+    weather: {
+      temperature: "29°C",
+      humidity: "61%",
+      windSpeed: "7.8 km/h",
+      trend: "+3.5% vs yesterday",
+      dispersion: "Moderate dispersion across Indo-Gangetic plain",
+    },
+    pollutants: [
+      { name: "PM2.5", value: 54.6, unit: "µg/m³", status: "Moderate" },
+      { name: "PM10", value: 94.0, unit: "µg/m³", status: "Moderate" },
+      { name: "NO₂", value: 33.2, unit: "µg/m³", status: "Good" },
+      { name: "SO₂", value: 11.4, unit: "µg/m³", status: "Good" },
+      { name: "CO", value: 0.9, unit: "mg/m³", status: "Good" },
+      { name: "O₃", value: 44.0, unit: "µg/m³", status: "Good" },
+    ],
+    weeklyTrend: [
+      { day: "Mon", aqi: 138 },
+      { day: "Tue", aqi: 146 },
+      { day: "Wed", aqi: 159 },
+      { day: "Thu", aqi: 152 },
+      { day: "Fri", aqi: 164 },
+      { day: "Sat", aqi: 158 },
+      { day: "Sun", aqi: 154 },
     ],
   },
   Mumbai: {

@@ -1,7 +1,14 @@
 import { MapPin } from "lucide-react";
 import { CITIES } from "../data/mockData";
+import { CURRENT_LOCATION_VALUE } from "../services/locationService";
 
-export function Header({ activePage, selectedCity, onCityChange }) {
+export function Header({
+  activePage,
+  selectedCity,
+  locationMode = "city",
+  resolvedLocationName = "",
+  onLocationSelect,
+}) {
   const titles = {
     dashboard: "Air Quality Dashboard",
     predict: "Predict AQI",
@@ -18,6 +25,9 @@ export function Header({ activePage, selectedCity, onCityChange }) {
     agent: "Ask natural-language questions to the multi-tool ReAct air quality intelligence agent.",
   };
 
+  const selectValue =
+    locationMode === "current" ? CURRENT_LOCATION_VALUE : selectedCity;
+
   return (
     <header className="header">
       <div>
@@ -30,9 +40,9 @@ export function Header({ activePage, selectedCity, onCityChange }) {
         <span className="location-dot"></span>
         <MapPin size={15} style={{ opacity: 0.7, marginRight: 2 }} />
         <select
-          value={selectedCity}
-          onChange={(e) => onCityChange(e.target.value)}
-          aria-label="Select Monitoring City"
+          value={selectValue}
+          onChange={(e) => onLocationSelect(e.target.value)}
+          aria-label="Select Monitoring City or Current Location"
           style={{
             border: "none",
             background: "transparent",
@@ -43,6 +53,11 @@ export function Header({ activePage, selectedCity, onCityChange }) {
             outline: "none",
           }}
         >
+          <option value={CURRENT_LOCATION_VALUE}>
+            {locationMode === "current" && resolvedLocationName
+              ? `Use my current location (${resolvedLocationName})`
+              : "Use my current location"}
+          </option>
           {CITIES.map((c) => (
             <option key={c.id} value={c.name}>
               {c.name}, India
@@ -55,3 +70,4 @@ export function Header({ activePage, selectedCity, onCityChange }) {
 }
 
 export default Header;
+

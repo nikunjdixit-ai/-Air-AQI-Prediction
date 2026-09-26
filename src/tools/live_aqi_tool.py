@@ -4,6 +4,8 @@ Retrieves real-time atmospheric pollutant concentrations and AQI from public API
 (Open-Meteo Air Quality API / WAQI / OpenAQ) with geocoding and offline city coordinates.
 """
 
+from datetime import datetime
+import math
 from typing import Any, Dict, Optional, Tuple
 import requests
 from src.aqi_utils import get_aqi_category, get_aqi_color, get_health_message, identify_dominant_pollutant
@@ -32,6 +34,64 @@ CITY_COORDINATES_CACHE: Dict[str, Tuple[float, float]] = {
     "varanasi": (25.3176, 82.9739),
     "agra": (27.1767, 78.0081)
 }
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate great-circle distance in kilometers between two coordinates."""
+    r = 6371.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2.0) ** 2
+    return 2.0 * r * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+
+
+def reverse_geocode_coordinates(lat: float, lon: float) -> str:
+    """
+    Resolve (latitude, longitude) into a human-readable city/region name.
+    Checks local city coordinate cache first (within 40 km), then queries
+    OpenStreetMap Nominatim reverse geocoding API with safe fallback.
+    """
+    best_city = None
+    best_dist = float("inf")
+    for city, (c_lat, c_lon) in CITY_COORDINATES_CACHE.items():
+        if city in ("bangalore", "gurgaon"):
+            continue
+        dist = _haversine_km(lat, lon, c_lat, c_lon)
+        if dist < best_dist:
+            best_dist = dist
+            best_city = city.title()
+
+    if best_city and best_dist <= 40.0:
+        return f"{best_city}, India"
+
+    try:
+        url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=10&addressdetails=1"
+        resp = requests.get(
+            url,
+            headers={"User-Agent": "AirSense-AQI-Monitor/1.1"},
+            timeout=3
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            addr = data.get("address", {})
+            place = (
+                addr.get("city")
+                or addr.get("town")
+                or addr.get("municipality")
+                or addr.get("state_district")
+                or addr.get("county")
+                or addr.get("state")
+            )
+            country = addr.get("country")
+            if place and country:
+                return f"{place}, {country}"
+            if place:
+                return str(place)
+    except Exception:
+        pass
+
+    return f"{lat:.2f}°N, {lon:.2f}°E"
 
 
 def geocode_location(location: str) -> Optional[Tuple[str, float, float]]:
@@ -66,41 +126,66 @@ def geocode_location(location: str) -> Optional[Tuple[str, float, float]]:
     return None
 
 
-def fetch_live_air_quality(location: str) -> Dict[str, Any]:
+def fetch_live_air_quality(
+    location: Optional[str] = None,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
+) -> Dict[str, Any]:
     """
-    Retrieve live air quality metrics for a specified city or location.
+    Retrieve live air quality metrics for a specified city or geographic coordinates.
     
     Returns a structured dictionary with:
       - status: 'success' or 'error'
+      - data_mode: 'live'
       - location: Resolved location name
+      - latitude / longitude: Coordinates queried
       - aqi: Computed or measured AQI
       - category: AQI Category (Good, Satisfactory, Moderate, Poor, Very Poor, Severe)
       - dominant_pollutant: Primary contributing pollutant
       - pollutants: Detailed concentrations (PM2.5, PM10, NO2, SO2, CO, O3)
-      - raw_metrics: Source sensor timestamps and regional indices
+      - data_timestamp: ISO sensor timestamp
     """
-    geo = geocode_location(location)
-    if not geo:
-        return {
-            "status": "error",
-            "message": f"Could not find coordinates for location '{location}'. Please check spelling or try a major nearby city.",
-            "location": location
-        }
-
-    resolved_name, lat, lon = geo
+    if latitude is not None and longitude is not None:
+        lat = float(latitude)
+        lon = float(longitude)
+        resolved_name = (
+            location.strip()
+            if (location and location.strip())
+            else reverse_geocode_coordinates(lat, lon)
+        )
+    else:
+        target_loc = location or "Delhi"
+        geo = geocode_location(target_loc)
+        if not geo:
+            return {
+                "status": "error",
+                "message": f"Could not find coordinates for location '{target_loc}'. Please check spelling or try a major nearby city.",
+                "location": target_loc
+            }
+        resolved_name, lat, lon = geo
 
     try:
-        # Query Open-Meteo Air Quality API
+        # Query Open-Meteo Air Quality API with retry for transient network glitches
         aq_url = (
             f"https://air-quality-api.open-meteo.com/v1/air-quality"
             f"?latitude={lat}&longitude={lon}"
             f"&current=pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone,european_aqi,us_aqi"
         )
-        resp = requests.get(aq_url, timeout=8)
-        if resp.status_code != 200:
+        resp = None
+        for attempt in range(2):
+            try:
+                resp = requests.get(aq_url, timeout=12)
+                if resp.status_code == 200:
+                    break
+            except Exception:
+                if attempt == 1:
+                    raise
+
+        if not resp or resp.status_code != 200:
+            status_code = resp.status_code if resp else "unknown"
             return {
                 "status": "error",
-                "message": f"Air Quality API returned HTTP status {resp.status_code}",
+                "message": f"Air Quality API returned HTTP status {status_code}",
                 "location": resolved_name
             }
 
@@ -158,9 +243,11 @@ def fetch_live_air_quality(location: str) -> Dict[str, Any]:
         }
 
         dominant_info = identify_dominant_pollutant(pollutants_dict)
+        measurement_time = current.get("time") or datetime.now().isoformat()
 
         return {
             "status": "success",
+            "data_mode": "live",
             "location": resolved_name,
             "latitude": lat,
             "longitude": lon,
@@ -171,10 +258,11 @@ def fetch_live_air_quality(location: str) -> Dict[str, Any]:
             "dominant_pollutant": dominant_info["dominant"],
             "dominant_ratio": dominant_info["ratio_to_safe_limit"],
             "pollutants": {k: (round(v, 2) if v is not None else None) for k, v in pollutants_dict.items()},
-            "measurement_time": current.get("time"),
+            "measurement_time": measurement_time,
+            "data_timestamp": measurement_time,
             "us_aqi": us_aqi,
             "european_aqi": european_aqi,
-            "source": "Open-Meteo Real-Time Atmospheric Monitoring"
+            "source": "Live Air Quality Data (Open-Meteo)"
         }
 
     except Exception as e:

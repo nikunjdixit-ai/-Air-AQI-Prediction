@@ -25,10 +25,27 @@ class TestFlaskRenderApp(unittest.TestCase):
         self.assertIsInstance(app, Flask)
 
     def test_index_route(self):
-        """Verify root route returns HTTP 200."""
+        """Verify root route strictly serves the compiled React SPA and NOT the legacy Flask HTML."""
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Air Quality Intelligence", response.data)
+        self.assertIn(b'<div id="root"></div>', response.data)
+        self.assertIn(b"AirSense", response.data)
+        self.assertNotIn(b'id="predictForm"', response.data)
+
+    def test_react_static_assets_and_spa_fallback(self):
+        """Verify compiled JS/CSS assets under /assets/ and SPA route fallback work."""
+        index_html = self.client.get("/").get_data(as_text=True)
+        import re
+        js_match = re.search(r'src="(/assets/[^"]+\.js)"', index_html)
+        self.assertIsNotNone(js_match, "Compiled JS bundle script tag must be present in index.html")
+        asset_resp = self.client.get(js_match.group(1))
+        self.assertEqual(asset_resp.status_code, 200)
+        self.assertGreater(len(asset_resp.data), 1000)
+
+        # Verify SPA client-side route fallback
+        spa_resp = self.client.get("/dashboard")
+        self.assertEqual(spa_resp.status_code, 200)
+        self.assertIn(b'<div id="root"></div>', spa_resp.data)
 
     def test_health_route(self):
         """Verify health check returns healthy status with HTTP 200."""
@@ -153,6 +170,63 @@ class TestFlaskRenderApp(unittest.TestCase):
         self.assertIn("Content-Type", response.headers.get("Access-Control-Allow-Headers", ""))
 
 
+    def test_live_invalid_coordinates(self):
+        """Verify /live rejects out-of-range or malformed lat/lon coordinates with HTTP 400."""
+        resp_range = self.client.get("/live?lat=999&lon=80.33")
+        self.assertEqual(resp_range.status_code, 400)
+        self.assertEqual(resp_range.get_json()["status"], "error")
+
+        resp_missing = self.client.get("/live?lat=26.4499")
+        self.assertEqual(resp_missing.status_code, 400)
+
+        resp_nan = self.client.get("/live?lat=invalid&lon=80.33")
+        self.assertEqual(resp_nan.status_code, 400)
+
+    def test_live_with_coordinates(self):
+        """Verify /live accepts lat/lon coordinates and returns normalized live contract."""
+        from unittest.mock import patch
+        mock_live = {
+            "status": "success",
+            "data_mode": "live",
+            "location": "Kanpur, India",
+            "latitude": 26.4499,
+            "longitude": 80.3319,
+            "aqi": 94.0,
+            "category": "Satisfactory",
+            "color": "#a3c853",
+            "health_message": "Air quality is acceptable.",
+            "dominant_pollutant": "PM2.5",
+            "dominant_ratio": 0.9,
+            "pollutants": {"PM2.5": 32.1, "PM10": 68.4, "NO2": 18.2, "SO2": 7.5, "CO": 0.55, "O3": 41.0},
+            "measurement_time": "2026-09-25T14:00",
+            "data_timestamp": "2026-09-25T14:00",
+            "source": "Live Air Quality Data (Open-Meteo)",
+        }
+        mock_weather = {
+            "status": "success",
+            "temperature_c": 31.4,
+            "feels_like_c": 34.0,
+            "relative_humidity_pct": 58,
+            "wind_speed_kmh": 11.2,
+            "weather_condition": "Mainly clear",
+            "dispersion_analysis": {"condition": "Favorable Dispersion"},
+        }
+        with patch("app.fetch_live_air_quality", return_value=mock_live), patch(
+            "app.fetch_weather_forecast", return_value=mock_weather
+        ):
+            response = self.client.get("/live?lat=26.4499&lon=80.3319")
+            self.assertEqual(response.status_code, 200)
+            data = response.get_json()
+            self.assertEqual(data["status"], "success")
+            self.assertEqual(data["data_mode"], "live")
+            self.assertEqual(data["location"], "Kanpur, India")
+            self.assertEqual(data["latitude"], 26.4499)
+            self.assertEqual(data["longitude"], 80.3319)
+            self.assertIn("weather", data)
+            self.assertEqual(data["weather"]["temperature"], 31.4)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

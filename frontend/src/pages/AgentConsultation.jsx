@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Bot,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
   Layers,
+  Mic,
+  MicOff,
   Send,
   Sparkles,
 } from "lucide-react";
@@ -16,6 +18,9 @@ export function AgentConsultation({ selectedCity = "Delhi" }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [showTools, setShowTools] = useState(true);
+  const [isListening, setIsListening] = useState(false);
+
+  const recognitionRef = useRef(null);
 
   const samplePrompts = [
     `What is the current AQI in ${selectedCity} right now?`,
@@ -26,6 +31,7 @@ export function AgentConsultation({ selectedCity = "Delhi" }) {
 
   const handleSubmit = async (e) => {
     if (e) e.preventDefault();
+
     if (!query.trim()) {
       setError("Please enter a question for the AI Agent.");
       return;
@@ -50,8 +56,71 @@ export function AgentConsultation({ selectedCity = "Delhi" }) {
     setError("");
   };
 
+  const handleVoiceInput = () => {
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setError(
+        "Voice input is not supported in this browser. Please use Google Chrome or Microsoft Edge."
+      );
+      return;
+    }
+
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+
+    recognition.lang = "en-IN";
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      setError("");
+    };
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+
+      setQuery((previousQuery) =>
+        previousQuery.trim()
+          ? `${previousQuery.trim()} ${transcript}`
+          : transcript
+      );
+    };
+
+    recognition.onerror = (event) => {
+      setIsListening(false);
+
+      if (event.error === "not-allowed") {
+        setError(
+          "Microphone permission was denied. Please allow microphone access."
+        );
+      } else if (event.error === "no-speech") {
+        setError("No speech detected. Please try speaking again.");
+      } else {
+        setError("Voice input failed. Please try again.");
+      }
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  };
+
   return (
-    <div className="agent-page" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+    <div
+      className="agent-page"
+      style={{ display: "flex", flexDirection: "column", gap: 20 }}
+    >
       {/* HERO BANNER */}
       <section className="model-hero">
         <div className="model-hero-content">
@@ -68,8 +137,9 @@ export function AgentConsultation({ selectedCity = "Delhi" }) {
             <h3>Air Quality Intelligence Agent</h3>
 
             <p>
-              An autonomous decision-making agent that plans, selects tools, fetches live sensor
-              and weather telemetry, queries historical baselines, and generates actionable advisories.
+              An autonomous decision-making agent that plans, selects tools,
+              fetches live sensor and weather telemetry, queries historical
+              baselines, and generates actionable advisories.
             </p>
           </div>
         </div>
@@ -95,12 +165,20 @@ export function AgentConsultation({ selectedCity = "Delhi" }) {
         </div>
 
         <p className="form-description">
-          Inquire about current health risks, outdoor exercise safety, weather dispersion,
-          or seasonal pollution patterns. The agent will orchestrate relevant tools to answer.
+          Inquire about current health risks, outdoor exercise safety, weather
+          dispersion, or seasonal pollution patterns. The agent will
+          orchestrate relevant tools to answer.
         </p>
 
         {/* SAMPLE PROMPT CHIPS */}
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 16 }}>
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
+            marginTop: 16,
+          }}
+        >
           {samplePrompts.map((prompt) => (
             <button
               key={prompt}
@@ -142,7 +220,7 @@ export function AgentConsultation({ selectedCity = "Delhi" }) {
               placeholder={`e.g., "Is it safe for an asthma patient to go outdoors in ${selectedCity} this evening?"`}
               style={{
                 width: "100%",
-                padding: "14px 16px",
+                padding: "14px 58px 14px 16px",
                 borderRadius: 12,
                 border: "1px solid #d8e2dc",
                 background: "#fbfcfb",
@@ -153,7 +231,54 @@ export function AgentConsultation({ selectedCity = "Delhi" }) {
                 boxSizing: "border-box",
               }}
             />
+
+            {/* VOICE INPUT BUTTON */}
+            <button
+              type="button"
+              onClick={handleVoiceInput}
+              disabled={loading}
+              title={
+                isListening ? "Stop listening" : "Speak your question"
+              }
+              aria-label={
+                isListening ? "Stop voice input" : "Start voice input"
+              }
+              style={{
+                position: "absolute",
+                right: 12,
+                top: 12,
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                border: "1px solid #d8e2dc",
+                background: isListening ? "#dcfce7" : "#ffffff",
+                color: isListening ? "#15803d" : "#375044",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: loading ? "not-allowed" : "pointer",
+                transition: "all 0.15s ease",
+              }}
+            >
+              {isListening ? <MicOff size={17} /> : <Mic size={17} />}
+            </button>
           </div>
+
+          {isListening && (
+            <div
+              style={{
+                marginTop: 8,
+                fontSize: 12,
+                color: "#15803d",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <Mic size={14} />
+              Listening... Speak your question.
+            </div>
+          )}
 
           {error && <div className="form-error">{error}</div>}
 
@@ -213,22 +338,52 @@ export function AgentConsultation({ selectedCity = "Delhi" }) {
                 }}
                 onClick={() => setShowTools(!showTools)}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
                   <Layers size={18} style={{ color: "#1f8f63" }} />
-                  <span style={{ fontWeight: 700, fontSize: 13, color: "#10231c" }}>
-                    Agent Execution Trace ({result.activity.length} Tools Invoked)
+
+                  <span
+                    style={{
+                      fontWeight: 700,
+                      fontSize: 13,
+                      color: "#10231c",
+                    }}
+                  >
+                    Agent Execution Trace ({result.activity.length} Tools
+                    Invoked)
                   </span>
                 </div>
+
                 <button
                   type="button"
-                  style={{ background: "none", border: "none", cursor: "pointer", color: "#71847b" }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#71847b",
+                  }}
                 >
-                  {showTools ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  {showTools ? (
+                    <ChevronUp size={16} />
+                  ) : (
+                    <ChevronDown size={16} />
+                  )}
                 </button>
               </div>
 
               {showTools && (
-                <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+                <div
+                  style={{
+                    marginTop: 12,
+                    display: "grid",
+                    gap: 8,
+                  }}
+                >
                   {result.activity.map((step, idx) => (
                     <div
                       key={idx}
@@ -244,7 +399,15 @@ export function AgentConsultation({ selectedCity = "Delhi" }) {
                         border: "1px solid #e5eee8",
                       }}
                     >
-                      <CheckCircle2 size={15} style={{ color: "#15803d", flexShrink: 0, marginTop: 1 }} />
+                      <CheckCircle2
+                        size={15}
+                        style={{
+                          color: "#15803d",
+                          flexShrink: 0,
+                          marginTop: 1,
+                        }}
+                      />
+
                       <span>{step}</span>
                     </div>
                   ))}
@@ -263,7 +426,14 @@ export function AgentConsultation({ selectedCity = "Delhi" }) {
               boxShadow: "0 8px 24px rgba(22, 47, 36, 0.04)",
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                marginBottom: 14,
+              }}
+            >
               <div
                 style={{
                   width: 36,
@@ -278,9 +448,15 @@ export function AgentConsultation({ selectedCity = "Delhi" }) {
               >
                 <Bot size={20} />
               </div>
+
               <div>
-                <h4 style={{ margin: 0, fontSize: 16 }}>Agent Synthesis</h4>
-                <small style={{ color: "#71847b" }}>Grounded with live sensor &amp; model data</small>
+                <h4 style={{ margin: 0, fontSize: 16 }}>
+                  Agent Synthesis
+                </h4>
+
+                <small style={{ color: "#71847b" }}>
+                  Grounded with live sensor &amp; model data
+                </small>
               </div>
             </div>
 
