@@ -29,7 +29,17 @@ Agent Instructions:
 - When asked about trends or comparisons, retrieve historical data and benchmark current conditions.
 - Refer to user conversational context (such as remembered city or health condition like asthma) without forcing the user to repeat themselves.
 - Present findings clearly with AQI category, health implications, and actionable recommendations.
+- Language Parity: Always respond in the user's primary language and dialect (English in English, Hindi in Hindi, Hinglish in Hinglish). If the user asks in Hindi, answer in natural Hindi. If the user asks in Hinglish, answer in Hinglish.
 """
+
+HINDI_AQI_CATEGORIES = {
+    "Good": "अच्छा (Good)",
+    "Satisfactory": "संतोषजनक (Satisfactory)",
+    "Moderate": "मध्यम (Moderate)",
+    "Poor": "खराब (Poor)",
+    "Very Poor": "बहुत खराब (Very Poor)",
+    "Severe": "गंभीर (Severe)",
+}
 
 
 class AirQualityAgent:
@@ -168,9 +178,11 @@ class AirQualityAgent:
         Guarantees zero-failure operation even without external LLM API credits.
         """
         q_lower = query.lower()
+        is_hindi = bool(re.search(r'[\u0900-\u097F]', query))
         all_locations: List[str] = self.memory.entities.get("all_locations", [])
         is_comparison_intent = bool(
             re.search(r"\b(?:compare|comparison|vs\.?|versus|or|between)\b", q_lower)
+            or any(w in query for w in ["तुलना", "बनाम", "या"])
         )
 
         # Multi-city comparison path when 2+ locations are detected with comparison intent
@@ -180,7 +192,7 @@ class AirQualityAgent:
             )
             needs_comparison_history = any(
                 w in q_lower for w in ["histor", "trend", "past", "previous", "usual", "average"]
-            )
+            ) or any(w in query for w in ["इतिहास", "पुराना", "पहले"])
 
             tool_outputs["fetch_live_air_quality"] = {}
             if needs_comparison_history:
@@ -209,6 +221,7 @@ class AirQualityAgent:
                 locations=all_locations,
                 live_by_city=tool_outputs["fetch_live_air_quality"],
                 history_by_city=tool_outputs.get("get_historical_aqi") if needs_comparison_history else None,
+                is_hindi=is_hindi,
             )
 
         location = self.memory.get_location()
@@ -227,11 +240,11 @@ class AirQualityAgent:
         needs_history = False
         needs_health = False
 
-        is_exercise = any(w in q_lower for w in ["run", "jog", "exercise", "walk", "cycl", "workout", "outside", "outdoor"])
-        is_tomorrow = any(w in q_lower for w in ["tomorrow", "forecast", "future", "next day", "predict"])
-        is_why_or_cause = any(w in q_lower for w in ["why", "cause", "reason", "worse", "poor", "pollutant", "mainly responsible", "contributing"])
-        is_trend_or_history = any(w in q_lower for w in ["histor", "trend", "compare", "past", "previous", "usual", "average"])
-        is_general_aqi = any(w in q_lower for w in ["what is the aqi", "aqi in", "air quality in", "current aqi", "how is the air"])
+        is_exercise = any(w in q_lower for w in ["run", "jog", "exercise", "walk", "cycl", "workout", "outside", "outdoor"]) or any(w in query for w in ["दौड़", "घूम", "टहल", "व्यायाम", "कसरत", "बाहर"])
+        is_tomorrow = any(w in q_lower for w in ["tomorrow", "forecast", "future", "next day", "predict"]) or any(w in query for w in ["कल", "भविष्य", "आने वाले"])
+        is_why_or_cause = any(w in q_lower for w in ["why", "cause", "reason", "worse", "poor", "pollutant", "mainly responsible", "contributing"]) or any(w in query for w in ["क्यों", "कारण", "वजह", "खराब"])
+        is_trend_or_history = any(w in q_lower for w in ["histor", "trend", "compare", "past", "previous", "usual", "average"]) or any(w in query for w in ["इतिहास", "पुराना", "पहले", "तुलना"])
+        is_general_aqi = any(w in q_lower for w in ["what is the aqi", "aqi in", "air quality in", "current aqi", "how is the air"]) or any(w in query for w in ["एक्यूआई", "हवा कैसी", "वायु गुणवत्ता"])
 
         # Decide tools
         if is_exercise:
@@ -312,7 +325,8 @@ class AirQualityAgent:
             is_exercise=is_exercise,
             is_tomorrow=is_tomorrow,
             is_why=is_why_or_cause,
-            is_trend=is_trend_or_history
+            is_trend=is_trend_or_history,
+            is_hindi=is_hindi
         )
 
     def _format_comparison_response(
@@ -320,8 +334,75 @@ class AirQualityAgent:
         locations: List[str],
         live_by_city: Dict[str, Dict[str, Any]],
         history_by_city: Optional[Dict[str, Dict[str, Any]]] = None,
+        is_hindi: bool = False,
     ) -> str:
         """Render a side-by-side Markdown comparison across 2+ cities with a verdict."""
+        if is_hindi:
+            parts = [f"### 🌍 वायु गुणवत्ता तुलना: {' बनाम '.join(locations)}\n"]
+            has_history = bool(history_by_city)
+            if has_history:
+                parts.append("| शहर | वर्तमान AQI | श्रेणी | मुख्य प्रदूषक | ऐतिहासिक औसत |")
+                parts.append("| :--- | :---: | :---: | :---: | :---: |")
+            else:
+                parts.append("| शहर | वर्तमान AQI | श्रेणी | मुख्य प्रदूषक |")
+                parts.append("| :--- | :---: | :---: | :---: |")
+
+            valid_aqi_entries = []
+            detail_lines = []
+
+            for city in locations:
+                live = live_by_city.get(city) or {}
+                hist = (history_by_city or {}).get(city) or {}
+                hist_mean = (
+                    f"{hist.get('stats', {}).get('mean_aqi')}"
+                    if hist.get("status") == "success" and hist.get("stats", {}).get("mean_aqi") is not None
+                    else "—"
+                )
+
+                if live.get("status") == "success" and live.get("aqi") is not None:
+                    aqi_val = float(live["aqi"])
+                    cat = live.get("category", "Unknown")
+                    cat_hi = HINDI_AQI_CATEGORIES.get(cat, cat)
+                    dom = live.get("dominant_pollutant", "PM2.5")
+                    valid_aqi_entries.append((city, aqi_val, cat_hi))
+
+                    if has_history:
+                        parts.append(f"| **{city}** | **{aqi_val:.0f}** | {cat_hi} | `{dom}` | {hist_mean} |")
+                        detail_lines.append(
+                            f"- **{city}:** वर्तमान AQI **{aqi_val:.0f}** ({cat_hi}) | मुख्य प्रदूषक: `{dom}` | ऐतिहासिक औसत: `{hist_mean}`"
+                        )
+                    else:
+                        parts.append(f"| **{city}** | **{aqi_val:.0f}** | {cat_hi} | `{dom}` |")
+                        detail_lines.append(
+                            f"- **{city}:** वर्तमान AQI **{aqi_val:.0f}** ({cat_hi}) | मुख्य प्रदूषक: `{dom}`"
+                        )
+                else:
+                    err_msg = live.get("message", "डेटा अनुपलब्ध")
+                    if has_history:
+                        parts.append(f"| **{city}** | अनुपलब्ध | — | — | {hist_mean} |")
+                    else:
+                        parts.append(f"| **{city}** | अनुपलब्ध | — | — |")
+                    detail_lines.append(f"- **{city}:** ⚠️ *{err_msg}*")
+
+            parts.append("\n" + "\n".join(detail_lines))
+
+            if len(valid_aqi_entries) >= 2:
+                sorted_by_aqi = sorted(valid_aqi_entries, key=lambda x: x[1])
+                best_city, best_aqi, best_cat = sorted_by_aqi[0]
+                worst_city, worst_aqi, worst_cat = sorted_by_aqi[-1]
+                if best_aqi == worst_aqi:
+                    parts.append(
+                        f"\n🏆 **निष्कर्ष:** दोनों **{best_city}** और **{worst_city}** का वायु गुणवत्ता स्तर एक जैसा है (AQI **{best_aqi:.0f}**, {best_cat})।"
+                    )
+                else:
+                    diff = worst_aqi - best_aqi
+                    parts.append(
+                        f"\n🏆 **निष्कर्ष:** **{best_city}** की हवा **{worst_city}** से बेहतर है (AQI **{best_aqi:.0f}** [{best_cat}] बनाम **{worst_aqi:.0f}** [{worst_cat}], **{diff:.0f}** अंक अधिक स्वच्छ)।"
+                    )
+
+            return "\n".join(parts)
+
+        # Standard English comparison
         parts = [f"### 🌍 Multi-City Air Quality Comparison: {' vs. '.join(locations)}\n"]
 
         has_history = bool(history_by_city)
@@ -397,11 +478,87 @@ class AirQualityAgent:
         is_exercise: bool,
         is_tomorrow: bool,
         is_why: bool,
-        is_trend: bool
+        is_trend: bool,
+        is_hindi: bool = False
     ) -> str:
         """Format synthesized findings into structured Markdown."""
         parts = []
 
+        if is_hindi:
+            # Header
+            parts.append(f"### 🌍 वायु गुणवत्ता रिपोर्ट: {location}\n")
+
+            # 1. Primary AQI Metric
+            if live and live.get("status") == "success":
+                aqi = live['aqi']
+                cat = live['category']
+                cat_hi = HINDI_AQI_CATEGORIES.get(cat, cat)
+                dom = live['dominant_pollutant']
+                pols = live.get("pollutants", {})
+                parts.append(
+                    f"- **वर्तमान AQI:** **{aqi:.0f}** ({cat_hi})\n"
+                    f"- **मुख्य प्रदूषक:** `{dom}` ({live.get('dominant_ratio', 1.0)}x सुरक्षित सीमा)\n"
+                    f"- **प्रदूषक स्तर:** PM2.5: `{pols.get('PM2.5')} µg/m³` | PM10: `{pols.get('PM10')} µg/m³` | NO2: `{pols.get('NO2')} µg/m³` | O3: `{pols.get('O3')} µg/m³`"
+                )
+            elif live:
+                parts.append(f"⚠️ *सूचना:* {live.get('message', 'लाइव डेटा उपलब्ध नहीं है।')}")
+
+            # 2. ML Prediction Context
+            if prediction and prediction.get("status") == "success":
+                pred_aqi = prediction['aqi']
+                pred_cat = prediction['category']
+                pred_cat_hi = HINDI_AQI_CATEGORIES.get(pred_cat, pred_cat)
+                parts.append(
+                    f"\n#### 🤖 कल के लिए एमएल पूर्वानुमान\n"
+                    f"- **पूर्वानुमानित AQI:** **{pred_aqi:.0f}** ({pred_cat_hi})\n"
+                    f"- **मॉडल इंजन:** `Random Forest` ($R^2 = 0.91$)\n"
+                    f"- **प्रमुख कारक:** `{prediction.get('dominant_pollutant')}`"
+                )
+
+            # 3. Weather & Dispersion Context
+            if weather and weather.get("status") == "success":
+                temp = weather.get("temperature_c")
+                humidity = weather.get("relative_humidity_pct")
+                wind = weather.get("wind_speed_kmh")
+                cond = weather.get("weather_condition")
+                disp = weather.get("dispersion_analysis", {})
+                parts.append(
+                    f"\n#### ⛅ मौसम एवं मौसमी स्थिति\n"
+                    f"- **मौसम स्थिति:** {cond} ({temp}°C, {humidity}% नमी, हवा: {wind} km/h)\n"
+                    f"- **वेंटिलेशन इंडेक्स:** **{disp.get('condition')}**\n"
+                    f"- **वायुमंडलीय स्थिति:** {disp.get('explanation')}"
+                )
+
+            # 4. Historical Trend Context
+            if history and history.get("status") == "success":
+                stats = history.get("stats", {})
+                comp = history.get("comparison_with_current", {})
+                parts.append(
+                    f"\n#### 📊 ऐतिहासिक रुझान विश्लेषण ({history.get('date_range_covered', 'Multi-Year')})\n"
+                    f"- **ऐतिहासिक औसत AQI:** {stats.get('mean_aqi')} (सीमा: {stats.get('min_aqi')} – {stats.get('max_aqi')})\n"
+                    f"- **तुलनात्मक स्थिति:** {comp.get('assessment', 'सामान्य मौसमी दायरे में।')}"
+                )
+
+            # 5. Health & Activity Advisory
+            if health and health.get("status") == "success":
+                adv = health.get("advisory", {})
+                parts.append(f"\n#### 🩺 स्वास्थ्य एवं गतिविधि परामर्श\n")
+                if is_exercise:
+                    safe = adv.get("is_safe_for_exercise")
+                    safe_badge = "✅ **बाहरी व्यायाम के लिए सुरक्षित**" if safe else "❌ **बाहरी दौड़/व्यायाम से बचें**"
+                    parts.append(f"- **व्यायाम सलाह:** {safe_badge}\n- {adv.get('activity_advice')}")
+                else:
+                    parts.append(f"- **स्वास्थ्य परामर्श:** {adv.get('general_message')}")
+
+                if adv.get("condition_advice") and adv.get("condition_advice") != "No elevated vulnerability identified.":
+                    parts.append(f"- **व्यक्तिगत स्वास्थ्य सुरक्षा:** {adv.get('condition_advice')}")
+
+                if adv.get("mask_recommended"):
+                    parts.append(f"- **मास्क सुरक्षा:** 😷 बाहर निकलते समय `{adv.get('recommended_mask')}` मास्क पहनें।")
+
+            return "\n".join(parts)
+
+        # Standard English formatting
         # Header
         parts.append(f"### 🌍 Air Quality Intelligence Report: {location}\n")
 

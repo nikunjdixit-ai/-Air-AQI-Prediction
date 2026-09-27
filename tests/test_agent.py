@@ -66,6 +66,19 @@ class TestAgent(unittest.TestCase):
         self.assertEqual(res2["location"], "Kanpur")
         self.assertIn("Kanpur", res2["response"])
 
+    def test_hindi_entity_extraction(self):
+        mem = SessionMemory()
+        mem.add_message("user", "मुझे दमा है और दिल्ली में हवा कैसी है?")
+        self.assertEqual(mem.get_location(), "Delhi")
+        self.assertIn("asthma", mem.entities["health_conditions"])
+
+    def test_hindi_agent_run(self):
+        res = self.agent.run("दिल्ली में आज प्रदूषण कैसा है?")
+        self.assertIn("response", res)
+        self.assertEqual(res["location"], "Delhi")
+        self.assertIn("वायु गुणवत्ता रिपोर्ट", res["response"])
+        self.assertIn("वर्तमान AQI", res["response"])
+
 
 if __name__ == "__main__":
     unittest.main()
