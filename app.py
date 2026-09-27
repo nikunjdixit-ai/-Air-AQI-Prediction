@@ -562,7 +562,7 @@ def health():
         logger.error("Health check model loading failed: %s", e)
         return jsonify({
             "status": "unhealthy",
-            "error": f"Model failed to load: {str(e)}"
+            "error": "Model health check failed."
         }), 500
 
     return jsonify({
@@ -737,7 +737,7 @@ def predict():
         logger.exception("Prediction failed unexpectedly: %s", e)
         return jsonify({
             "status": "error",
-            "message": f"Prediction computation failed: {str(e)}"
+            "message": "Prediction service encountered an internal error."
         }), 500
 
 
@@ -789,7 +789,7 @@ def agent_query():
         logger.exception("Agent execution failed: %s", e)
         return jsonify({
             "status": "error",
-            "message": f"Agent query failed: {str(e)}"
+            "message": "Agent service encountered an internal error."
         }), 500
 
 
