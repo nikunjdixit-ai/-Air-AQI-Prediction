@@ -8,4 +8,4 @@ services:
       - key: PYTHON_VERSION
         value: 3.12.0
       - key: NODE_VERSION
-        value: 20.18.0
+        value: 20.19.0

@@ -663,7 +663,7 @@ def live_aqi():
                 location_name=result.get("location") or city,
                 lat=result.get("latitude", lat_val),
                 lon=result.get("longitude", lon_val),
-                reason=f"Processing error: {str(e)}"
+                reason="Weather data temporarily unavailable"
             )
             disp_val = fallback_weather.get("dispersion_analysis", {}).get("condition")
             result["weather"] = {
