@@ -768,6 +768,12 @@ def agent_query():
 
     query = str(query).strip()
 
+    if len(query) > 4000:
+        return jsonify({
+            "status": "error",
+            "message": "Query is too long. Please keep your question under 4000 characters."
+        }), 400
+
     try:
         agent = get_agent()
         res = agent.run(query)
