@@ -224,6 +224,78 @@ class TestFlaskRenderApp(unittest.TestCase):
             self.assertEqual(data["longitude"], 80.3319)
             self.assertIn("weather", data)
             self.assertEqual(data["weather"]["temperature"], 31.4)
+            self.assertEqual(data["weather"]["data_mode"], "live")
+
+    def test_live_weather_failure_resilience(self):
+        """Verify /live remains HTTP 200 and returns fallback weather marked as offline_baseline when weather provider returns error (e.g. HTTP 429)."""
+        from unittest.mock import patch
+        mock_live = {
+            "status": "success",
+            "data_mode": "live",
+            "location": "Delhi",
+            "latitude": 28.6139,
+            "longitude": 77.2090,
+            "aqi": 145.0,
+            "category": "Moderate",
+            "color": "#FFCC00",
+            "health_message": "Sensitive groups should reduce outdoor exercise.",
+            "dominant_pollutant": "PM2.5",
+            "dominant_ratio": 1.1,
+            "pollutants": {"PM2.5": 65.0, "PM10": 110.0, "NO2": 25.0, "SO2": 10.0, "CO": 0.8, "O3": 35.0},
+            "measurement_time": "2026-09-27T01:00",
+            "data_timestamp": "2026-09-27T01:00",
+            "source": "Live Air Quality Data (Open-Meteo)",
+        }
+        mock_weather_err = {
+            "status": "error",
+            "message": "Weather API returned HTTP status 429",
+            "location": "Delhi"
+        }
+        with patch("app.fetch_live_air_quality", return_value=mock_live), patch(
+            "app.fetch_weather_forecast", return_value=mock_weather_err
+        ):
+            response = self.client.get("/live?city=Delhi")
+            self.assertEqual(response.status_code, 200)
+            data = response.get_json()
+            self.assertEqual(data["status"], "success")
+            self.assertEqual(data["data_mode"], "live")
+            self.assertEqual(data["aqi"], 145.0)
+            self.assertIn("weather", data)
+            self.assertEqual(data["weather"]["data_mode"], "offline_baseline")
+            self.assertIn("Fallback", data["weather"]["source"])
+            self.assertIsNotNone(data["weather"]["temperature"])
+
+    def test_live_weather_exception_resilience(self):
+        """Verify /live does not crash (returns HTTP 200) if weather fetch raises an unexpected exception."""
+        from unittest.mock import patch
+        mock_live = {
+            "status": "success",
+            "data_mode": "live",
+            "location": "Mumbai",
+            "latitude": 19.0760,
+            "longitude": 72.8777,
+            "aqi": 88.0,
+            "category": "Satisfactory",
+            "color": "#84cc16",
+            "health_message": "Air quality is satisfactory.",
+            "dominant_pollutant": "PM2.5",
+            "dominant_ratio": 0.8,
+            "pollutants": {"PM2.5": 35.0, "PM10": 70.0, "NO2": 20.0, "SO2": 8.0, "CO": 0.5, "O3": 30.0},
+            "measurement_time": "2026-09-27T01:00",
+            "data_timestamp": "2026-09-27T01:00",
+            "source": "Live Air Quality Data (Open-Meteo)",
+        }
+        with patch("app.fetch_live_air_quality", return_value=mock_live), patch(
+            "app.fetch_weather_forecast", side_effect=RuntimeError("Connection dropped by provider")
+        ):
+            response = self.client.get("/live?city=Mumbai")
+            self.assertEqual(response.status_code, 200)
+            data = response.get_json()
+            self.assertEqual(data["status"], "success")
+            self.assertEqual(data["data_mode"], "live")
+            self.assertIn("weather", data)
+            self.assertEqual(data["weather"]["data_mode"], "offline_baseline")
+            self.assertIsNotNone(data["weather"]["temperature"])
 
 
 if __name__ == "__main__":

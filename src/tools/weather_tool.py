@@ -63,6 +63,69 @@ def evaluate_dispersion(wind_speed: float, humidity: float, precip: float) -> Di
     }
 
 
+# Calibrated seasonal weather baselines for major Indian cities when external live weather API is unreachable
+CITY_WEATHER_BASELINES: Dict[str, Dict[str, Any]] = {
+    "kanpur": {"temperature_c": 28.0, "feels_like_c": 30.0, "relative_humidity_pct": 64, "wind_speed_kmh": 8.4, "condition": "Partly cloudy"},
+    "delhi": {"temperature_c": 31.0, "feels_like_c": 33.0, "relative_humidity_pct": 58, "wind_speed_kmh": 6.2, "condition": "Haze"},
+    "mumbai": {"temperature_c": 30.0, "feels_like_c": 35.0, "relative_humidity_pct": 75, "wind_speed_kmh": 12.0, "condition": "Humid"},
+    "bengaluru": {"temperature_c": 24.0, "feels_like_c": 24.0, "relative_humidity_pct": 60, "wind_speed_kmh": 10.0, "condition": "Mainly clear"},
+    "bangalore": {"temperature_c": 24.0, "feels_like_c": 24.0, "relative_humidity_pct": 60, "wind_speed_kmh": 10.0, "condition": "Mainly clear"},
+    "lucknow": {"temperature_c": 29.0, "feels_like_c": 31.0, "relative_humidity_pct": 61, "wind_speed_kmh": 7.5, "condition": "Partly cloudy"},
+    "kolkata": {"temperature_c": 30.0, "feels_like_c": 34.0, "relative_humidity_pct": 72, "wind_speed_kmh": 9.0, "condition": "Hazy"},
+    "chennai": {"temperature_c": 32.0, "feels_like_c": 37.0, "relative_humidity_pct": 78, "wind_speed_kmh": 11.0, "condition": "Humid"},
+}
+
+
+def get_fallback_weather(
+    location_name: str,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    reason: str = "Provider unavailable",
+) -> Dict[str, Any]:
+    """
+    Provide calibrated city baseline or seasonal average explicitly tagged as non-live.
+    Ensures graceful degradation without presenting fallback estimates as live telemetry.
+    """
+    city_key = None
+    if location_name:
+        clean = location_name.split(",")[0].strip().lower()
+        if clean in CITY_WEATHER_BASELINES:
+            city_key = clean
+
+    base = CITY_WEATHER_BASELINES.get(
+        city_key,
+        {
+            "temperature_c": 28.0,
+            "feels_like_c": 30.0,
+            "relative_humidity_pct": 65,
+            "wind_speed_kmh": 8.0,
+            "condition": "Partly cloudy",
+        },
+    )
+
+    dispersion = evaluate_dispersion(
+        base["wind_speed_kmh"], float(base["relative_humidity_pct"]), 0.0
+    )
+
+    return {
+        "status": "success",
+        "data_mode": "offline_baseline",
+        "location": location_name,
+        "latitude": lat,
+        "longitude": lon,
+        "temperature_c": base["temperature_c"],
+        "feels_like_c": base["feels_like_c"],
+        "relative_humidity_pct": base["relative_humidity_pct"],
+        "wind_speed_kmh": base["wind_speed_kmh"],
+        "wind_direction_deg": 180,
+        "precipitation_mm": 0.0,
+        "weather_condition": base["condition"],
+        "dispersion_analysis": dispersion,
+        "forecast": [],
+        "source": f"Seasonal Baseline Fallback ({reason})",
+    }
+
+
 from src.tools.live_aqi_tool import geocode_location, reverse_geocode_coordinates
 
 
@@ -115,11 +178,7 @@ def fetch_weather_forecast(
 
         if not resp or resp.status_code != 200:
             status_code = resp.status_code if resp else "unknown"
-            return {
-                "status": "error",
-                "message": f"Weather API returned HTTP status {status_code}",
-                "location": resolved_name
-            }
+            return get_fallback_weather(resolved_name, lat, lon, reason=f"HTTP {status_code}")
 
         data = resp.json()
         current = data.get("current", {})
@@ -156,6 +215,7 @@ def fetch_weather_forecast(
 
         return {
             "status": "success",
+            "data_mode": "live",
             "location": resolved_name,
             "latitude": lat,
             "longitude": lon,
@@ -172,21 +232,4 @@ def fetch_weather_forecast(
         }
 
     except Exception as e:
-        # Fallback to seasonal baseline on network timeouts
-        dispersion = evaluate_dispersion(8.0, 65.0, 0.0)
-        return {
-            "status": "success",
-            "location": resolved_name,
-            "latitude": lat,
-            "longitude": lon,
-            "temperature_c": 28.0,
-            "feels_like_c": 30.0,
-            "relative_humidity_pct": 65,
-            "wind_speed_kmh": 8.0,
-            "wind_direction_deg": 180,
-            "precipitation_mm": 0.0,
-            "weather_condition": "Partly cloudy",
-            "dispersion_analysis": dispersion,
-            "forecast": [],
-            "source": f"Seasonal Baseline Fallback (API error: {str(e)})"
-        }
+        return get_fallback_weather(resolved_name, lat, lon, reason=f"API error: {str(e)}")

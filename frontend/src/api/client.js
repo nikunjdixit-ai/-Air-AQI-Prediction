@@ -17,9 +17,20 @@ export const API_BASE_URL = (() => {
     return envUrl.trim().replace(/\/+$/, "");
   }
 
+  // Inside Capacitor native Android app, relative URLs resolve to http://localhost
+  // on the mobile device. Route to live Render backend by default unless overridden.
+  if (
+    typeof window !== "undefined" &&
+    window.Capacitor &&
+    typeof window.Capacitor.isNativePlatform === "function" &&
+    window.Capacitor.isNativePlatform()
+  ) {
+    return "https://air-aqi-prediction.onrender.com";
+  }
+
   // Empty base URL means:
   // - Local development: Vite proxy handles /api requests.
-  // - Production: Flask/Gunicorn handles same-origin requests.
+  // - Production website: Flask/Gunicorn handles same-origin requests.
   return "";
 })();
 

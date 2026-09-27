@@ -62,7 +62,7 @@ export function AgentConsultation({ selectedCity = "Delhi" }) {
 
     if (!SpeechRecognition) {
       setError(
-        "Voice input is not supported in this browser. Please use Google Chrome or Microsoft Edge."
+        "Voice input is not supported on this device/browser. Please type your query."
       );
       return;
     }

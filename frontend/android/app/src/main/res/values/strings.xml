@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AirSense</string>
+    <string name="title_activity_main">AirSense</string>
+    <string name="package_name">com.airsense.aqi</string>
+    <string name="custom_url_scheme">com.airsense.aqi</string>
+</resources>

@@ -73,9 +73,22 @@ export function App() {
       });
     }, 60000);
 
+    if (typeof window !== "undefined" && window.history && !window.history.state) {
+      window.history.replaceState({ page: "dashboard" }, "");
+    }
+
+    const handlePopState = (event) => {
+      const targetPage = event.state?.page || "dashboard";
+      setActivePage(targetPage);
+      setMenuOpen(false);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+
     return () => {
       isMounted = false;
       clearInterval(interval);
+      window.removeEventListener("popstate", handlePopState);
     };
   }, []);
 
@@ -99,7 +112,12 @@ export function App() {
   }, []);
 
   const navigateTo = (page) => {
-    setActivePage(page);
+    if (page !== activePage) {
+      if (typeof window !== "undefined" && window.history) {
+        window.history.pushState({ page }, "");
+      }
+      setActivePage(page);
+    }
     setMenuOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };

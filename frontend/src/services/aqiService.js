@@ -117,6 +117,88 @@ export async function getLiveAQI(queryOrCity = "Kanpur") {
     const cat = getCategoryInfo(rawAqi);
     const resolvedLocation = raw.location || `${fallbackCityName}, India`;
 
+    // Calibrated baseline lookup for city if live weather provider is unreachable
+    const cleanKey = Object.keys(CITY_DEFAULTS).find(
+      (k) => k.toLowerCase() === fallbackCityName.toLowerCase()
+    );
+    const cityDefault = cleanKey ? CITY_DEFAULTS[cleanKey] : null;
+
+    const weatherHasLiveData =
+      weather.temperature != null &&
+      weather.data_mode !== "offline_baseline" &&
+      !String(weather.source || "").toLowerCase().includes("fallback") &&
+      !String(weather.source || "").toLowerCase().includes("baseline");
+
+    const weatherIsFallback =
+      !weatherHasLiveData &&
+      (weather.data_mode === "offline_baseline" ||
+        weather.temperature != null ||
+        cityDefault?.weather != null);
+
+    let resolvedWeather;
+
+    if (weatherHasLiveData) {
+      resolvedWeather = {
+        dataMode: "live",
+        isFallback: false,
+        source: weather.source || "Live Weather Data (Open-Meteo)",
+        temperature: `${Math.round(Number(weather.temperature))}°C`,
+        humidity:
+          weather.relative_humidity != null
+            ? `${Math.round(Number(weather.relative_humidity))}%`
+            : "—",
+        windSpeed:
+          weather.wind_speed != null
+            ? `${Number(weather.wind_speed).toFixed(1)} km/h`
+            : "—",
+        trend: raw.dispersion_index || weather.condition || "Live sensor reading",
+        dispersion: raw.dispersion_index || weather.dispersion || "Unavailable",
+      };
+    } else if (weatherIsFallback) {
+      const fbTemp =
+        weather.temperature != null
+          ? `${Math.round(Number(weather.temperature))}°C`
+          : cityDefault?.weather?.temperature || "—";
+      const fbHumidity =
+        weather.relative_humidity != null
+          ? `${Math.round(Number(weather.relative_humidity))}%`
+          : cityDefault?.weather?.humidity || "—";
+      const fbWind =
+        weather.wind_speed != null
+          ? `${Number(weather.wind_speed).toFixed(1)} km/h`
+          : cityDefault?.weather?.windSpeed || "—";
+
+      resolvedWeather = {
+        dataMode: "offline_baseline",
+        isFallback: true,
+        source: weather.source || "Offline City Baseline",
+        temperature: fbTemp,
+        humidity: fbHumidity,
+        windSpeed: fbWind,
+        trend:
+          raw.dispersion_index ||
+          weather.condition ||
+          cityDefault?.weather?.trend ||
+          "Calibrated baseline",
+        dispersion:
+          raw.dispersion_index ||
+          weather.dispersion ||
+          cityDefault?.weather?.dispersion ||
+          "Baseline dispersion",
+      };
+    } else {
+      resolvedWeather = {
+        dataMode: "unavailable",
+        isFallback: false,
+        source: "Weather data unavailable",
+        temperature: "—",
+        humidity: "—",
+        windSpeed: "—",
+        trend: "Unavailable",
+        dispersion: "Unavailable",
+      };
+    }
+
     return {
       success: true,
       dataMode: "live",
@@ -130,16 +212,7 @@ export async function getLiveAQI(queryOrCity = "Kanpur") {
       categoryBg: cat.bg,
       description: raw.health_message || cat.desc,
       dominantPollutant: raw.dominant_pollutant || "PM2.5",
-      weather: {
-        temperature:
-          weather.temperature != null ? `${Math.round(Number(weather.temperature))}°C` : "—",
-        humidity:
-          weather.relative_humidity != null ? `${Math.round(Number(weather.relative_humidity))}%` : "—",
-        windSpeed:
-          weather.wind_speed != null ? `${Number(weather.wind_speed).toFixed(1)} km/h` : "—",
-        trend: raw.dispersion_index || weather.condition || "Live sensor reading",
-        dispersion: raw.dispersion_index || weather.dispersion || "Unavailable",
-      },
+      weather: resolvedWeather,
       pollutants: pollutantList,
       source: "Live Air Quality Data",
       timestamp: formatLiveTimestamp(raw.data_timestamp || raw.measurement_time),

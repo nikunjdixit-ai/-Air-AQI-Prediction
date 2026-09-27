@@ -357,7 +357,9 @@ export function Dashboard({
               {loading
                 ? "—"
                 : isLiveMode
-                ? "Live Air Quality Data"
+                ? data?.weather?.isFallback
+                  ? "Live AQI • Baseline Weather"
+                  : "Live Air Quality Data"
                 : "Offline City Baseline"}
             </span>
             <span>
@@ -394,28 +396,46 @@ export function Dashboard({
             icon={<Cloud size={20} />}
             title="Temperature"
             value={loading ? "—" : data?.weather?.temperature || "—"}
-            description={loading ? "Fetching live air quality..." : "Atmospheric condition"}
+            description={
+              loading
+                ? "Fetching live air quality..."
+                : data?.weather?.isFallback
+                ? "Calibrated city baseline"
+                : "Atmospheric condition"
+            }
           />
 
           <InfoCard
             icon={<Droplets size={20} />}
             title="Humidity"
             value={loading ? "—" : data?.weather?.humidity || "—"}
-            description="Relative humidity"
+            description={
+              data?.weather?.isFallback
+                ? "Calibrated baseline"
+                : "Relative humidity"
+            }
           />
 
           <InfoCard
             icon={<Wind size={20} />}
             title="Wind Speed"
             value={loading ? "—" : data?.weather?.windSpeed || "—"}
-            description="Ventilation velocity"
+            description={
+              data?.weather?.isFallback
+                ? "Calibrated baseline"
+                : "Ventilation velocity"
+            }
           />
 
           <InfoCard
             icon={<Activity size={20} />}
             title="AQI Trend / Mixing"
             value={loading ? "—" : data?.weather?.trend || "—"}
-            description="Atmospheric dispersion index"
+            description={
+              data?.weather?.isFallback
+                ? "Baseline dispersion (Live weather offline)"
+                : "Atmospheric dispersion index"
+            }
           />
         </div>
       </section>

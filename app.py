@@ -26,7 +26,7 @@ FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
 
 from src.predictor import predict_aqi_rich, load_model
 from src.tools.live_aqi_tool import fetch_live_air_quality
-from src.tools.weather_tool import fetch_weather_forecast
+from src.tools.weather_tool import fetch_weather_forecast, get_fallback_weather
 from src.tools.prediction_tool import predict_aqi_tool
 from src.tools.historical_tool import get_historical_aqi
 from src.agent.orchestrator import AirQualityAgent
@@ -618,17 +618,65 @@ def live_aqi():
                 longitude=result.get("longitude", lon_val),
             )
             if weather_data.get("status") == "success":
+                is_fallback = (
+                    weather_data.get("data_mode") == "offline_baseline"
+                    or "Fallback" in weather_data.get("source", "")
+                )
+                disp_val = (
+                    weather_data.get("dispersion_analysis", {}).get("condition")
+                    if isinstance(weather_data.get("dispersion_analysis"), dict)
+                    else weather_data.get("dispersion_analysis")
+                )
                 result["weather"] = {
                     "temperature": weather_data.get("temperature_c"),
                     "feels_like": weather_data.get("feels_like_c"),
                     "relative_humidity": weather_data.get("relative_humidity_pct"),
                     "wind_speed": weather_data.get("wind_speed_kmh"),
                     "condition": weather_data.get("weather_condition"),
-                    "dispersion": weather_data.get("dispersion_analysis", {}).get("condition"),
+                    "dispersion": disp_val,
+                    "data_mode": "offline_baseline" if is_fallback else "live",
+                    "source": weather_data.get("source", "Live Weather Data (Open-Meteo)"),
                 }
-                result["dispersion_index"] = weather_data.get("dispersion_analysis", {}).get("condition")
+                result["dispersion_index"] = disp_val
+            else:
+                fallback_weather = get_fallback_weather(
+                    location_name=result.get("location") or city,
+                    lat=result.get("latitude", lat_val),
+                    lon=result.get("longitude", lon_val),
+                    reason=weather_data.get("message", "Provider unavailable")
+                )
+                disp_val = fallback_weather.get("dispersion_analysis", {}).get("condition")
+                result["weather"] = {
+                    "temperature": fallback_weather.get("temperature_c"),
+                    "feels_like": fallback_weather.get("feels_like_c"),
+                    "relative_humidity": fallback_weather.get("relative_humidity_pct"),
+                    "wind_speed": fallback_weather.get("wind_speed_kmh"),
+                    "condition": fallback_weather.get("weather_condition"),
+                    "dispersion": disp_val,
+                    "data_mode": "offline_baseline",
+                    "source": fallback_weather.get("source"),
+                }
+                result["dispersion_index"] = disp_val
         except Exception as e:
             logger.warning("Weather augmentation failed for %s: %s", result.get("location") or city, e)
+            fallback_weather = get_fallback_weather(
+                location_name=result.get("location") or city,
+                lat=result.get("latitude", lat_val),
+                lon=result.get("longitude", lon_val),
+                reason=f"Processing error: {str(e)}"
+            )
+            disp_val = fallback_weather.get("dispersion_analysis", {}).get("condition")
+            result["weather"] = {
+                "temperature": fallback_weather.get("temperature_c"),
+                "feels_like": fallback_weather.get("feels_like_c"),
+                "relative_humidity": fallback_weather.get("relative_humidity_pct"),
+                "wind_speed": fallback_weather.get("wind_speed_kmh"),
+                "condition": fallback_weather.get("weather_condition"),
+                "dispersion": disp_val,
+                "data_mode": "offline_baseline",
+                "source": fallback_weather.get("source"),
+            }
+            result["dispersion_index"] = disp_val
 
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code

@@ -1601,8 +1601,8 @@ button {
 
   position: fixed;
 
-  top: 15px;
-  left: 15px;
+  top: calc(15px + env(safe-area-inset-top, 0px));
+  left: calc(15px + env(safe-area-inset-left, 0px));
 
   z-index: 200;
 
@@ -1682,7 +1682,7 @@ button {
 
     margin-left: 0;
 
-    padding: 75px 20px 40px;
+    padding: calc(75px + env(safe-area-inset-top, 0px)) calc(20px + env(safe-area-inset-right, 0px)) calc(40px + env(safe-area-inset-bottom, 0px)) calc(20px + env(safe-area-inset-left, 0px));
   }
 
   .header {
