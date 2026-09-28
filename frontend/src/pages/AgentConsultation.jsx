@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { Capacitor } from "@capacitor/core";
+import { TextToSpeech } from "@capacitor-community/text-to-speech";
 import {
   Bot,
   CheckCircle2,
@@ -65,6 +67,19 @@ export function AgentConsultation({ selectedCity = "Delhi" }) {
     "Compare the air quality between Delhi and Mumbai.",
   ];
 
+  const stopAnySpeech = async () => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await TextToSpeech.stop();
+      } catch {
+        // ignore stop errors
+      }
+    } else if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    setIsSpeaking(false);
+  };
+
   // Prefetch TTS voices and handle cleanup on component unmount
   useEffect(() => {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -76,9 +91,7 @@ export function AgentConsultation({ selectedCity = "Delhi" }) {
     }
 
     return () => {
-      if (typeof window !== "undefined" && "speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-      }
+      stopAnySpeech();
       if (recognitionRef.current) {
         try {
           recognitionRef.current.abort();
@@ -92,10 +105,7 @@ export function AgentConsultation({ selectedCity = "Delhi" }) {
   const handleSubmit = async (e) => {
     if (e) e.preventDefault();
 
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-      setIsSpeaking(false);
-    }
+    await stopAnySpeech();
 
     if (!query.trim()) {
       setError("Please enter a question for the AI Agent.");
@@ -190,15 +200,9 @@ export function AgentConsultation({ selectedCity = "Delhi" }) {
     }
   };
 
-  const handleToggleSpeech = () => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-      setError("Text-to-Speech is not supported in this browser or device.");
-      return;
-    }
-
+  const handleToggleSpeech = async () => {
     if (isSpeaking) {
-      window.speechSynthesis.cancel();
-      setIsSpeaking(false);
+      await stopAnySpeech();
       return;
     }
 
@@ -206,16 +210,52 @@ export function AgentConsultation({ selectedCity = "Delhi" }) {
       return;
     }
 
-    window.speechSynthesis.cancel();
-
     const spokenText = cleanMarkdownForSpeech(result.response);
     if (!spokenText) return;
+
+    const isHindi =
+      /[\u0900-\u097F]/.test(result.response) || speechLang === "hi-IN";
+
+    // Native Android execution via Capacitor Text-to-Speech plugin
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await TextToSpeech.stop();
+      } catch {
+        // ignore stop errors
+      }
+
+      setIsSpeaking(true);
+      setError("");
+
+      try {
+        await TextToSpeech.speak({
+          text: spokenText,
+          lang: isHindi ? "hi-IN" : "en-IN",
+          rate: 0.96,
+          pitch: 1.0,
+        });
+      } catch (nativeErr) {
+        console.warn("Native TTS playback error:", nativeErr);
+        setError(
+          "Android Text-to-Speech playback failed. Please verify device TTS settings."
+        );
+      } finally {
+        setIsSpeaking(false);
+      }
+      return;
+    }
+
+    // Web Browser execution via Web Speech API
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      setError("Text-to-Speech is not supported in this browser or device.");
+      return;
+    }
+
+    window.speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(spokenText);
     utteranceRef.current = utterance;
 
-    const isHindi =
-      /[\u0900-\u097F]/.test(result.response) || speechLang === "hi-IN";
     const voices = window.speechSynthesis.getVoices() || [];
 
     if (isHindi) {
